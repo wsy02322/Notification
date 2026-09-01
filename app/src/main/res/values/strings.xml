@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">消息监控</string>
+    <string name="channel_monitor_name">正在监听</string>
+    <string name="channel_monitor_desc">监听开启时的常驻提示，无声音。</string>
+    <string name="channel_alert_name">命中提醒</string>
+    <string name="channel_alert_desc">关键词命中后的循环提醒，需手动确认。</string>
+    <string name="monitor_notification_title">正在监听消息</string>
+    <string name="monitor_notification_text">微信 / 闲鱼等勾选应用的通知会被监控。</string>
+    <string name="alert_notification_title">有消息命中</string>
+    <string name="alert_notification_title_multi">有 %1$d 条消息命中</string>
+    <string name="alert_notification_text">点击「我知道了」停止震动和音乐。</string>
+    <string name="action_confirm">我知道了</string>
+    <string name="test_alert_title">测试</string>
+    <string name="test_alert_text">这是一条测试提醒，确认后才会停止。</string>
+</resources>
