@@ -2,6 +2,14 @@
 
 纯本地 Android 应用：勾选微信 / 闲鱼（小红书、抖音可选），按关键词命中后循环震动并播放提醒音乐，直到你在应用内或通知栏点「我知道了」。
 
+## 下载 APK
+
+手机浏览器打开下面链接即可下载安装（debug 签名，需允许「未知来源」）：
+
+**[notification-monitor-v1.0-debug.apk](https://github.com/wsy02322/Notification/raw/cursor/android-notification-monitor-6ff1/apk/notification-monitor-v1.0-debug.apk)**
+
+仓库内路径：[apk/notification-monitor-v1.0-debug.apk](apk/notification-monitor-v1.0-debug.apk)
+
 ## 功能
 
 - 勾选要监控的 App（按包名过滤）
@@ -31,4 +39,4 @@ echo "sdk.dir=$ANDROID_HOME" > local.properties
 ./gradlew :app:assembleDebug :app:testDebugUnitTest
 ```
 
-安装 `app/build/outputs/apk/debug/app-debug.apk`。本应用不会上架，请侧载安装。
+生成的安装包在 `app/build/outputs/apk/debug/app-debug.apk`，仓库里已放一份可直接下载的副本：`apk/notification-monitor-v1.0-debug.apk`。本应用不会上架，请侧载安装。
