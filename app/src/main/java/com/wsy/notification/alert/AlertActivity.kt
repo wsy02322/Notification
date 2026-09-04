@@ -33,7 +33,10 @@ class AlertActivity : ComponentActivity() {
                 val alerting by AlertState.isAlerting.collectAsStateWithLifecycle()
                 val items by AlertState.items.collectAsStateWithLifecycle()
                 LaunchedEffect(alerting) {
-                    if (!alerting) finish()
+                    if (!alerting) {
+                        kotlinx.coroutines.delay(400)
+                        if (!AlertState.isAlerting.value) finish()
+                    }
                 }
                 AlertScreen(
                     items = items,

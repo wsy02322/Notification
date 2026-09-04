@@ -19,7 +19,7 @@ object OemSettings {
             m in listOf("oneplus") -> "一加"
             m in listOf("vivo", "iqoo") -> "vivo"
             m in listOf("samsung") -> "三星"
-            m in listOf("huawei", "honor") -> "华为 / 荣耀（未专项适配）"
+            m in listOf("huawei", "honor") -> "华为 / 荣耀"
             else -> Build.MANUFACTURER
         }
     }
@@ -47,6 +47,13 @@ object OemSettings {
                 "应用电池设为「无限制」",
                 "最近任务锁定",
                 "不要放入应用速冻",
+            )
+            m in listOf("huawei", "honor") -> listOf(
+                "应用启动管理设为「手动管理」，允许自启动 / 关联启动 / 后台活动",
+                "必须打开「后台弹出界面」，否则确认页在后台弹不出来",
+                "打开「锁屏显示」和通知详情",
+                "电池设为「不允许」优化 / 无限制",
+                "最近任务锁定本应用",
             )
             m in listOf("samsung") -> listOf(
                 "应用电池设为「不受限」",
@@ -98,6 +105,12 @@ object OemSettings {
         if (m in listOf("vivo", "iqoo")) {
             list += component("com.vivo.permissionmanager", "com.vivo.permissionmanager.activity.BgStartUpManagerActivity")
             list += component("com.iqoo.secure", "com.iqoo.secure.ui.phoneoptimize.BgStartUpManager")
+        }
+        if (m in listOf("huawei", "honor")) {
+            list += component("com.hihonor.systemmanager", "com.hihonor.systemmanager.appcontrol.activity.StartupAppControlActivity")
+            list += component("com.huawei.systemmanager", "com.huawei.systemmanager.appcontrol.activity.StartupAppControlActivity")
+            list += component("com.huawei.systemmanager", "com.huawei.systemmanager.startupmgr.ui.StartupNormalAppListActivity")
+            list += component("com.huawei.systemmanager", "com.huawei.systemmanager.optimize.process.ProtectActivity")
         }
         if (m == "samsung") {
             list += component("com.samsung.android.sm_cn", "com.samsung.android.sm.ui.battery.BatteryActivity")

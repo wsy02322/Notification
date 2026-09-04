@@ -60,15 +60,24 @@ class NotificationMonitorService : NotificationListenerService() {
         }
 
         val keywords = KeywordMatcher.parseKeywords(prefs.keywordsRaw)
-        val reason = KeywordMatcher.diagnose(content, selected, keywords)
+        var reason = KeywordMatcher.diagnose(content, selected, keywords)
+        if (reason.startsWith("SKIP") && KeywordMatcher.isGenericUnreadSummary(content)) {
+            val previous = prefs.recentHitKeyword(content.packageName)
+            if (previous != null) {
+                reason = "HIT follow-up-summary after keyword='$previous'"
+            }
+        }
         if (interesting || reason.startsWith("HIT")) {
             DebugLog.i(
                 "Listener",
                 "$reason pkg=${content.packageName} label='${content.appLabel}' " +
-                    "title='${content.title}' text='${content.text}'",
+                    "title='${content.title}' text='${content.text}' extras=${extrasDump(notification.notification.extras)}",
             )
         }
         if (!reason.startsWith("HIT")) return
+        val hitKeyword = Regex("keyword='([^']*)'").find(reason)?.groupValues?.get(1)
+            ?: keywords.firstOrNull().orEmpty()
+        prefs.recordHit(content.packageName, hitKeyword)
 
         AlertForegroundService.postMatch(
             this,
@@ -86,6 +95,7 @@ class NotificationMonitorService : NotificationListenerService() {
         val extras = n.extras
         val title = NotificationTextExtractor.combineTitle(
             extras.charSeq(Notification.EXTRA_TITLE),
+            extras.charSeq(Notification.EXTRA_CONVERSATION_TITLE),
             n.tickerText?.toString(),
         )
         val body = NotificationTextExtractor.combineBody(
@@ -133,5 +143,13 @@ class NotificationMonitorService : NotificationListenerService() {
             if (line.isNotBlank()) out += line
         }
         return out
+    }
+
+    private fun extrasDump(extras: Bundle?): String {
+        if (extras == null) return "{}"
+        return extras.keySet().sorted().joinToString(prefix = "{", postfix = "}") { key ->
+            val value = extras.get(key)?.toString()?.replace("\n", " ")?.take(60).orEmpty()
+            "$key=$value"
+        }
     }
 }

@@ -117,7 +117,7 @@ fun MainRoute() {
             }
 
             Text(
-                "当前机型：${OemSettings.brandLabel()}。再打开厂商后台设置，并在最近任务里锁定本应用。",
+                "当前机型：${OemSettings.brandLabel()}。再打开厂商后台设置，并在最近任务里锁定本应用。荣耀必须打开「后台弹出界面」，否则后台只有声音没有确认页。",
                 style = MaterialTheme.typography.bodySmall,
             )
             OemSettings.guidanceLines().forEach { line ->
@@ -188,8 +188,6 @@ fun MainRoute() {
                     monitoring = true
                     DebugLog.writeSnapshot(context)
                     DebugLog.i("UI", "start monitoring apps=$selected keywords='${keywords.replace("\n", " | ")}'")
-                    PermissionChecker.bounceNotificationListener(context)
-                    DebugLog.i("UI", "bounced notification listener component")
                     AlertForegroundService.start(context)
                     Toast.makeText(context, "已开始监听", Toast.LENGTH_SHORT).show()
                 },

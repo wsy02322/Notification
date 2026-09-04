@@ -2,10 +2,12 @@ package com.wsy.notification.match
 
 /** 把通知 extras 里常见的标题/正文拼成可搜索文本，纯 Kotlin 便于单测。 */
 object NotificationTextExtractor {
-    fun combineTitle(title: String?, ticker: String?): String {
-        val t = title?.trim().orEmpty()
-        if (t.isNotEmpty()) return t
-        return ticker?.trim().orEmpty()
+    fun combineTitle(title: String?, conversationTitle: String?, ticker: String?): String {
+        listOf(title, conversationTitle, ticker).forEach { value ->
+            val t = value?.trim().orEmpty()
+            if (t.isNotEmpty()) return t
+        }
+        return ""
     }
 
     fun combineBody(

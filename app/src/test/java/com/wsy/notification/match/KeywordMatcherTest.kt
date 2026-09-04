@@ -107,6 +107,18 @@ class KeywordMatcherTest {
         assertThat(
             KeywordMatcher.diagnose(content(text = "已付款"), selected, listOf("已付款")),
         ).contains("HIT keyword=")
+        assertThat(
+            KeywordMatcher.diagnose(
+                content(title = "最近收到2条未读消息", text = ""),
+                selected,
+                listOf("喜欢打包的墩墩"),
+            ),
+        ).contains("generic-unread")
+        assertThat(
+            KeywordMatcher.isGenericUnreadSummary(
+                content(title = "最近收到2条未读消息", text = ""),
+            ),
+        ).isTrue()
     }
 }
 
@@ -148,7 +160,7 @@ class NotificationTextExtractorTest {
 
     @Test
     fun titleFallsBackToTicker() {
-        val title = NotificationTextExtractor.combineTitle(null, "会话")
+        val title = NotificationTextExtractor.combineTitle(null, null, "会话")
         assertThat(title).isEqualTo("会话")
     }
 }

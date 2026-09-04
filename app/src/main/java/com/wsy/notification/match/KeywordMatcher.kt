@@ -4,6 +4,7 @@ import java.util.Locale
 
 object KeywordMatcher {
     private val separators = Regex("[\n,，、;；]+")
+    private val GENERIC_UNREAD = Regex("未读消息|发来一条新消息|条新消息|条未读")
 
     fun parseKeywords(raw: String): List<String> =
         raw.split(separators)
@@ -31,11 +32,16 @@ object KeywordMatcher {
         if (keywords.isEmpty()) return "HIT empty-keywords"
         val haystack = content.haystack().foldCase()
         val hit = keywords.firstOrNull { keyword -> haystack.contains(keyword.foldCase()) }
-        return if (hit != null) {
-            "HIT keyword='$hit'"
-        } else {
-            "SKIP no-keyword keywords=$keywords"
+        if (hit != null) return "HIT keyword='$hit'"
+        if (isGenericUnreadSummary(content)) {
+            return "SKIP generic-unread keywords=$keywords"
         }
+        return "SKIP no-keyword keywords=$keywords"
+    }
+
+    fun isGenericUnreadSummary(content: NotificationContent): Boolean {
+        val blob = "${content.title}\n${content.text}"
+        return GENERIC_UNREAD.containsMatchIn(blob)
     }
 
     private fun String.foldCase(): String = lowercase(Locale.ROOT)

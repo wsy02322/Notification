@@ -1,5 +1,6 @@
 package com.wsy.notification.alert
 
+import android.app.ActivityOptions
 import android.app.Notification
 import android.app.PendingIntent
 import android.app.Service
@@ -8,7 +9,9 @@ import android.content.pm.ServiceInfo
 import android.media.AudioAttributes
 import android.media.MediaPlayer
 import android.os.Build
+import android.os.Handler
 import android.os.IBinder
+import android.os.Looper
 import android.os.PowerManager
 import android.os.VibrationEffect
 import android.os.Vibrator
@@ -27,7 +30,9 @@ class AlertForegroundService : Service() {
 
     private var mediaPlayer: MediaPlayer? = null
     private var wakeLock: PowerManager.WakeLock? = null
+    private var screenWakeLock: PowerManager.WakeLock? = null
     private var alerting = false
+    private val mainHandler = Handler(Looper.getMainLooper())
 
     private val vibrator: Vibrator by lazy {
         if (Build.VERSION.SDK_INT >= 31) {
@@ -92,6 +97,7 @@ class AlertForegroundService : Service() {
 
     private fun confirmAlert() {
         DebugLog.i("Alert", "confirm alerting=$alerting queued=${AlertState.snapshot().size}")
+        mainHandler.removeCallbacksAndMessages(null)
         if (!alerting && AlertState.snapshot().isEmpty()) {
             startAsForeground(idleNotification())
             return
@@ -104,6 +110,7 @@ class AlertForegroundService : Service() {
 
     private fun confirmAndStopMonitoring() {
         DebugLog.i("Alert", "stop monitoring service")
+        mainHandler.removeCallbacksAndMessages(null)
         stopSoundAndVibration()
         alerting = false
         AlertState.clear()
@@ -166,7 +173,7 @@ class AlertForegroundService : Service() {
             .setStyle(NotificationCompat.BigTextStyle().bigText(text))
             .setContentIntent(fullScreen)
             .setOngoing(true)
-            .setCategory(NotificationCompat.CATEGORY_ALARM)
+            .setCategory(NotificationCompat.CATEGORY_CALL)
             .setPriority(NotificationCompat.PRIORITY_MAX)
             .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
             .setForegroundServiceBehavior(NotificationCompat.FOREGROUND_SERVICE_IMMEDIATE)
@@ -190,13 +197,55 @@ class AlertForegroundService : Service() {
             .isAtLeast(Lifecycle.State.STARTED)
         val canFsi = PermissionChecker.canUseFullScreenIntent(this)
         DebugLog.i("Alert", "launch AlertActivity inForeground=$inForeground canFsi=$canFsi")
-        if (!inForeground && !canFsi) return
+        wakeScreen()
+        launchAlertActivity("immediate")
+        mainHandler.postDelayed({ launchAlertActivity("retry-400") }, 400)
+        mainHandler.postDelayed({ launchAlertActivity("retry-1200") }, 1200)
+    }
+
+    private fun launchAlertActivity(reason: String) {
+        if (!alerting) return
         val intent = Intent(this, AlertActivity::class.java)
             .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP)
+        val opts = activityStartOptions()
+        DebugLog.i("Alert", "startActivity $reason opts=${opts != null}")
         try {
-            startActivity(intent)
+            if (opts != null) startActivity(intent, opts) else startActivity(intent)
         } catch (e: Exception) {
-            DebugLog.e("Alert", "Unable to launch alert activity", e)
+            DebugLog.e("Alert", "startActivity $reason failed", e)
+        }
+    }
+
+    private fun activityStartOptions(): android.os.Bundle? {
+        if (Build.VERSION.SDK_INT < 34) return null
+        return try {
+            val options = ActivityOptions.makeBasic()
+            options.setPendingIntentCreatorBackgroundActivityStartMode(
+                ActivityOptions.MODE_BACKGROUND_ACTIVITY_START_ALLOWED,
+            )
+            options.toBundle()
+        } catch (e: Exception) {
+            DebugLog.w("Alert", "ActivityOptions unavailable: ${e.message}")
+            null
+        }
+    }
+
+    @Suppress("DEPRECATION")
+    private fun wakeScreen() {
+        try {
+            val pm = getSystemService(POWER_SERVICE) as PowerManager
+            if (screenWakeLock?.isHeld != true) {
+                screenWakeLock = pm.newWakeLock(
+                    PowerManager.SCREEN_BRIGHT_WAKE_LOCK or PowerManager.ACQUIRE_CAUSES_WAKEUP,
+                    "notifywatch:screen",
+                ).apply {
+                    setReferenceCounted(false)
+                    acquire(8_000)
+                }
+            }
+            DebugLog.i("Alert", "screen wake isInteractive=${pm.isInteractive}")
+        } catch (e: Exception) {
+            DebugLog.e("Alert", "screen wake failed", e)
         }
     }
 
@@ -251,6 +300,7 @@ class AlertForegroundService : Service() {
         } catch (_: Exception) {
         }
         releaseWakeLock()
+        releaseScreenWakeLock()
     }
 
     private fun acquireWakeLock() {
@@ -270,10 +320,23 @@ class AlertForegroundService : Service() {
         wakeLock = null
     }
 
+    private fun releaseScreenWakeLock() {
+        try {
+            if (screenWakeLock?.isHeld == true) screenWakeLock?.release()
+        } catch (_: Exception) {
+        }
+        screenWakeLock = null
+    }
+
     private fun activityPending(cls: Class<*>, requestCode: Int): PendingIntent {
         val intent = Intent(this, cls)
             .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP)
-        return PendingIntent.getActivity(this, requestCode, intent, pendingFlags())
+        val options = activityStartOptions()
+        return if (options != null) {
+            PendingIntent.getActivity(this, requestCode, intent, pendingFlags(), options)
+        } else {
+            PendingIntent.getActivity(this, requestCode, intent, pendingFlags())
+        }
     }
 
     private fun pendingFlags(): Int =

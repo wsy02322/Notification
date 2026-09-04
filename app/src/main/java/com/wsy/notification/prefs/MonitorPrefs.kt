@@ -27,10 +27,28 @@ class MonitorPrefs(context: Context) {
             prefs.edit().putBoolean(KEY_MONITORING, value).apply()
         }
 
+    fun recordHit(packageName: String, keyword: String) {
+        prefs.edit()
+            .putString(KEY_HIT_PKG, packageName)
+            .putString(KEY_HIT_KEYWORD, keyword)
+            .putLong(KEY_HIT_AT, System.currentTimeMillis())
+            .apply()
+    }
+
+    fun recentHitKeyword(packageName: String, windowMs: Long = 30 * 60 * 1000L): String? {
+        if (prefs.getString(KEY_HIT_PKG, "") != packageName) return null
+        val at = prefs.getLong(KEY_HIT_AT, 0L)
+        if (at <= 0L || System.currentTimeMillis() - at > windowMs) return null
+        return prefs.getString(KEY_HIT_KEYWORD, null)?.takeIf { it.isNotBlank() }
+    }
+
     companion object {
         private const val PREFS_NAME = "monitor_prefs"
         private const val KEY_PACKAGES = "selected_packages"
         private const val KEY_KEYWORDS = "keywords"
         private const val KEY_MONITORING = "monitoring_enabled"
+        private const val KEY_HIT_PKG = "last_hit_pkg"
+        private const val KEY_HIT_KEYWORD = "last_hit_keyword"
+        private const val KEY_HIT_AT = "last_hit_at"
     }
 }
