@@ -6,10 +6,12 @@ import android.app.NotificationManager
 import android.media.AudioAttributes
 import android.os.Build
 import androidx.core.app.NotificationManagerCompat
+import com.wsy.notification.debug.DebugLog
 
 class NotificationApp : Application() {
     override fun onCreate() {
         super.onCreate()
+        DebugLog.init(this)
         createChannels()
     }
 

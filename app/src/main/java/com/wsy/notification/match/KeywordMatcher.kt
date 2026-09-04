@@ -18,11 +18,24 @@ object KeywordMatcher {
         content: NotificationContent,
         selectedPackages: Set<String>,
         keywords: List<String>,
-    ): Boolean {
-        if (content.packageName !in selectedPackages) return false
-        if (keywords.isEmpty()) return true
+    ): Boolean = diagnose(content, selectedPackages, keywords).startsWith("HIT")
+
+    fun diagnose(
+        content: NotificationContent,
+        selectedPackages: Set<String>,
+        keywords: List<String>,
+    ): String {
+        if (content.packageName !in selectedPackages) {
+            return "SKIP package=${content.packageName} not-selected"
+        }
+        if (keywords.isEmpty()) return "HIT empty-keywords"
         val haystack = content.haystack().foldCase()
-        return keywords.any { keyword -> haystack.contains(keyword.foldCase()) }
+        val hit = keywords.firstOrNull { keyword -> haystack.contains(keyword.foldCase()) }
+        return if (hit != null) {
+            "HIT keyword='$hit'"
+        } else {
+            "SKIP no-keyword keywords=$keywords"
+        }
     }
 
     private fun String.foldCase(): String = lowercase(Locale.ROOT)

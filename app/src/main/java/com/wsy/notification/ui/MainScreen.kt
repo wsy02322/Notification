@@ -1,6 +1,7 @@
 package com.wsy.notification.ui
 
 import android.Manifest
+import android.content.Intent
 import android.os.Build
 import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -41,6 +42,8 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import com.wsy.notification.alert.AlertForegroundService
+import com.wsy.notification.debug.DebugLog
+import com.wsy.notification.debug.LogActivity
 import com.wsy.notification.match.MonitoredApp
 import com.wsy.notification.oem.OemSettings
 import com.wsy.notification.oem.PermissionChecker
@@ -183,7 +186,10 @@ fun MainRoute() {
                     }
                     prefs.monitoringEnabled = true
                     monitoring = true
+                    DebugLog.writeSnapshot(context)
+                    DebugLog.i("UI", "start monitoring apps=$selected keywords='${keywords.replace("\n", " | ")}'")
                     PermissionChecker.bounceNotificationListener(context)
+                    DebugLog.i("UI", "bounced notification listener component")
                     AlertForegroundService.start(context)
                     Toast.makeText(context, "已开始监听", Toast.LENGTH_SHORT).show()
                 },
@@ -195,6 +201,7 @@ fun MainRoute() {
                 onClick = {
                     prefs.monitoringEnabled = false
                     monitoring = false
+                    DebugLog.i("UI", "stop monitoring")
                     AlertForegroundService.stop(context)
                     Toast.makeText(context, "已停止监听", Toast.LENGTH_SHORT).show()
                 },
@@ -204,11 +211,24 @@ fun MainRoute() {
 
             OutlinedButton(
                 onClick = {
+                    DebugLog.i("UI", "tap test alert")
                     AlertForegroundService.start(context)
                     AlertForegroundService.test(context)
                 },
                 modifier = Modifier.fillMaxWidth(),
             ) { Text("测试提醒（循环震动+音乐，点我知道了才停）") }
+
+            Button(
+                onClick = {
+                    context.startActivity(Intent(context, LogActivity::class.java))
+                },
+                modifier = Modifier.fillMaxWidth(),
+            ) { Text("查看 / 导出测试日志") }
+
+            Text(
+                "测完后打开「查看 / 导出测试日志」，点导出或复制，把文件发给我排查。",
+                style = MaterialTheme.typography.bodySmall,
+            )
 
             Text(
                 "被监控的微信 / 闲鱼也需要打开系统通知，并尽量允许自启动。若关闭消息详情，发送人和正文关键词会失效，但勾选了该 App 仍会提醒。",

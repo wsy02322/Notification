@@ -5,9 +5,9 @@ import android.content.ComponentName
 import android.os.Bundle
 import android.service.notification.NotificationListenerService
 import android.service.notification.StatusBarNotification
-import android.util.Log
 import com.wsy.notification.alert.AlertForegroundService
 import com.wsy.notification.alert.AlertItem
+import com.wsy.notification.debug.DebugLog
 import com.wsy.notification.match.DedupTracker
 import com.wsy.notification.match.KeywordMatcher
 import com.wsy.notification.match.NotificationContent
@@ -21,28 +21,54 @@ class NotificationMonitorService : NotificationListenerService() {
 
     override fun onListenerConnected() {
         super.onListenerConnected()
-        Log.i(TAG, "Notification listener connected")
+        DebugLog.i("Listener", "connected")
     }
 
     override fun onListenerDisconnected() {
         super.onListenerDisconnected()
-        Log.w(TAG, "Notification listener disconnected, requesting rebind")
+        DebugLog.w("Listener", "disconnected, requestRebind")
         requestRebind(ComponentName(this, NotificationMonitorService::class.java))
     }
 
     override fun onNotificationPosted(sbn: StatusBarNotification?) {
         val notification = sbn ?: return
-        if (!prefs.monitoringEnabled) return
         if (notification.packageName == packageName) return
-        if (notification.isOngoing) return
+        val selected = prefs.selectedPackages
+        val interesting = notification.packageName in selected
+        if (!prefs.monitoringEnabled) {
+            if (interesting) DebugLog.i("Listener", "skip ${notification.packageName} monitoring=off")
+            return
+        }
+        if (notification.isOngoing) {
+            if (interesting) DebugLog.i("Listener", "skip ${notification.packageName} ongoing")
+            return
+        }
         val flags = notification.notification.flags
-        if (flags and Notification.FLAG_GROUP_SUMMARY != 0) return
+        if (flags and Notification.FLAG_GROUP_SUMMARY != 0) {
+            if (interesting) DebugLog.i("Listener", "skip ${notification.packageName} group-summary")
+            return
+        }
 
-        val content = extract(notification) ?: return
-        if (!dedup.isNew(notification.key, content.fingerprint())) return
+        val content = extract(notification)
+        if (content == null) {
+            DebugLog.w("Listener", "skip ${notification.packageName} extract=null")
+            return
+        }
+        if (!dedup.isNew(notification.key, content.fingerprint())) {
+            if (interesting) DebugLog.i("Listener", "skip ${content.packageName} dedup key=${notification.key}")
+            return
+        }
 
         val keywords = KeywordMatcher.parseKeywords(prefs.keywordsRaw)
-        if (!KeywordMatcher.matches(content, prefs.selectedPackages, keywords)) return
+        val reason = KeywordMatcher.diagnose(content, selected, keywords)
+        if (interesting || reason.startsWith("HIT")) {
+            DebugLog.i(
+                "Listener",
+                "$reason pkg=${content.packageName} label='${content.appLabel}' " +
+                    "title='${content.title}' text='${content.text}'",
+            )
+        }
+        if (!reason.startsWith("HIT")) return
 
         AlertForegroundService.postMatch(
             this,
@@ -107,9 +133,5 @@ class NotificationMonitorService : NotificationListenerService() {
             if (line.isNotBlank()) out += line
         }
         return out
-    }
-
-    companion object {
-        private const val TAG = "NotifyWatch"
     }
 }

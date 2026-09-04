@@ -4,11 +4,13 @@
 
 ## 下载 APK
 
-手机浏览器打开下面链接即可下载安装（debug 签名，需允许「未知来源」）：
+请装 **v1.1**（含测试日志导出）。手机浏览器打开下面链接即可下载（debug 签名，需允许「未知来源」）：
 
-**[notification-monitor-v1.0-debug.apk](https://github.com/wsy02322/Notification/raw/cursor/android-notification-monitor-6ff1/apk/notification-monitor-v1.0-debug.apk)**
+**[notification-monitor-v1.1-debug.apk](https://github.com/wsy02322/Notification/raw/cursor/android-notification-monitor-6ff1/apk/notification-monitor-v1.1-debug.apk)**
 
-仓库内路径：[apk/notification-monitor-v1.0-debug.apk](apk/notification-monitor-v1.0-debug.apk)
+仓库内路径：[apk/notification-monitor-v1.1-debug.apk](apk/notification-monitor-v1.1-debug.apk)
+
+测完后在应用里点 **「查看 / 导出测试日志」** → **导出/分享** 或 **复制全部**，把日志发给我排查。
 
 ## 功能
 
@@ -39,4 +41,4 @@ echo "sdk.dir=$ANDROID_HOME" > local.properties
 ./gradlew :app:assembleDebug :app:testDebugUnitTest
 ```
 
-生成的安装包在 `app/build/outputs/apk/debug/app-debug.apk`，仓库里已放一份可直接下载的副本：`apk/notification-monitor-v1.0-debug.apk`。本应用不会上架，请侧载安装。
+生成的安装包在 `app/build/outputs/apk/debug/app-debug.apk`，仓库里已放一份可直接下载的副本：`apk/notification-monitor-v1.1-debug.apk`。本应用不会上架，请侧载安装。

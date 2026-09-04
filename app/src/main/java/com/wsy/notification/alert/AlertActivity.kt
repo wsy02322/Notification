@@ -9,12 +9,14 @@ import androidx.activity.enableEdgeToEdge
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.wsy.notification.debug.DebugLog
 import com.wsy.notification.ui.AlertScreen
 import com.wsy.notification.ui.theme.NotificationTheme
 
 class AlertActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        DebugLog.i("UI", "AlertActivity onCreate")
         if (Build.VERSION.SDK_INT >= 27) {
             setShowWhenLocked(true)
             setTurnScreenOn(true)
@@ -36,6 +38,7 @@ class AlertActivity : ComponentActivity() {
                 AlertScreen(
                     items = items,
                     onConfirm = {
+                        DebugLog.i("UI", "AlertActivity confirm button")
                         AlertForegroundService.confirm(this@AlertActivity)
                         finish()
                     },

@@ -94,6 +94,20 @@ class KeywordMatcherTest {
         val keywords = KeywordMatcher.parseKeywords(",,\n  ，")
         assertThat(keywords).isEmpty()
     }
+
+    @Test
+    fun diagnoseExplainsSkipAndHit() {
+        val selected = setOf(MonitoredApp.WECHAT.packageName)
+        assertThat(
+            KeywordMatcher.diagnose(content(), setOf(MonitoredApp.XIANYU.packageName), emptyList()),
+        ).startsWith("SKIP")
+        assertThat(
+            KeywordMatcher.diagnose(content(), selected, emptyList()),
+        ).startsWith("HIT")
+        assertThat(
+            KeywordMatcher.diagnose(content(text = "已付款"), selected, listOf("已付款")),
+        ).contains("HIT keyword=")
+    }
 }
 
 class DedupTrackerTest {

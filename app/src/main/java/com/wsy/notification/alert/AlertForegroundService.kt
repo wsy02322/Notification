@@ -13,7 +13,6 @@ import android.os.PowerManager
 import android.os.VibrationEffect
 import android.os.Vibrator
 import android.os.VibratorManager
-import android.util.Log
 import androidx.core.app.NotificationCompat
 import androidx.core.app.ServiceCompat
 import androidx.lifecycle.ProcessLifecycleOwner
@@ -21,6 +20,7 @@ import androidx.lifecycle.Lifecycle
 import com.wsy.notification.MainActivity
 import com.wsy.notification.NotificationApp
 import com.wsy.notification.R
+import com.wsy.notification.debug.DebugLog
 import com.wsy.notification.oem.PermissionChecker
 
 class AlertForegroundService : Service() {
@@ -42,11 +42,13 @@ class AlertForegroundService : Service() {
     override fun onCreate() {
         super.onCreate()
         instance = this
+        DebugLog.i("Alert", "service onCreate")
     }
 
     override fun onBind(intent: Intent?): IBinder? = null
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        DebugLog.i("Alert", "onStartCommand action=${intent?.action} flags=$flags")
         when (intent?.action) {
             ACTION_STOP -> {
                 confirmAndStopMonitoring()
@@ -61,12 +63,17 @@ class AlertForegroundService : Service() {
     }
 
     fun onMatch(item: AlertItem) {
+        DebugLog.i(
+            "Alert",
+            "onMatch label='${item.appLabel}' title='${item.title}' text='${item.text}' alreadyAlerting=$alerting",
+        )
         AlertState.add(item)
         startAlerting()
     }
 
     private fun startIdleForeground() {
         if (!alerting) {
+            DebugLog.i("Alert", "idle foreground notification")
             startAsForeground(idleNotification())
         }
     }
@@ -77,12 +84,14 @@ class AlertForegroundService : Service() {
             acquireWakeLock()
             startSound()
             startVibration()
+            DebugLog.i("Alert", "start looping sound+vibrate")
         }
         startAsForeground(alertNotification())
         maybeLaunchAlertActivity()
     }
 
     private fun confirmAlert() {
+        DebugLog.i("Alert", "confirm alerting=$alerting queued=${AlertState.snapshot().size}")
         if (!alerting && AlertState.snapshot().isEmpty()) {
             startAsForeground(idleNotification())
             return
@@ -94,6 +103,7 @@ class AlertForegroundService : Service() {
     }
 
     private fun confirmAndStopMonitoring() {
+        DebugLog.i("Alert", "stop monitoring service")
         stopSoundAndVibration()
         alerting = false
         AlertState.clear()
@@ -166,6 +176,9 @@ class AlertForegroundService : Service() {
 
         if (Build.VERSION.SDK_INT < 34 || PermissionChecker.canUseFullScreenIntent(this)) {
             builder.setFullScreenIntent(fullScreen, true)
+            DebugLog.i("Alert", "alert notification with fullScreenIntent")
+        } else {
+            DebugLog.w("Alert", "alert notification without fullScreenIntent (permission off)")
         }
         return builder.build()
     }
@@ -176,20 +189,25 @@ class AlertForegroundService : Service() {
             .currentState
             .isAtLeast(Lifecycle.State.STARTED)
         val canFsi = PermissionChecker.canUseFullScreenIntent(this)
+        DebugLog.i("Alert", "launch AlertActivity inForeground=$inForeground canFsi=$canFsi")
         if (!inForeground && !canFsi) return
         val intent = Intent(this, AlertActivity::class.java)
             .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP)
         try {
             startActivity(intent)
         } catch (e: Exception) {
-            Log.w(TAG, "Unable to launch alert activity", e)
+            DebugLog.e("Alert", "Unable to launch alert activity", e)
         }
     }
 
     private fun startSound() {
         if (mediaPlayer != null) return
         try {
-            val player = MediaPlayer.create(this, R.raw.alert_loop) ?: return
+            val player = MediaPlayer.create(this, R.raw.alert_loop)
+            if (player == null) {
+                DebugLog.e("Alert", "MediaPlayer.create returned null")
+                return
+            }
             player.isLooping = true
             player.setAudioAttributes(
                 AudioAttributes.Builder()
@@ -200,8 +218,9 @@ class AlertForegroundService : Service() {
             player.setWakeMode(this, PowerManager.PARTIAL_WAKE_LOCK)
             player.start()
             mediaPlayer = player
+            DebugLog.i("Alert", "sound started")
         } catch (e: Exception) {
-            Log.e(TAG, "Unable to start alert sound", e)
+            DebugLog.e("Alert", "Unable to start alert sound", e)
         }
     }
 
@@ -275,6 +294,7 @@ class AlertForegroundService : Service() {
     )
 
     override fun onDestroy() {
+        DebugLog.w("Alert", "service onDestroy")
         stopSoundAndVibration()
         AlertState.clear()
         instance = null
@@ -282,7 +302,6 @@ class AlertForegroundService : Service() {
     }
 
     companion object {
-        private const val TAG = "NotifyWatch"
         const val ACTION_START = "com.wsy.notification.action.START"
         const val ACTION_STOP = "com.wsy.notification.action.STOP"
         const val ACTION_MATCH = "com.wsy.notification.action.MATCH"
@@ -303,22 +322,26 @@ class AlertForegroundService : Service() {
             private set
 
         fun start(context: android.content.Context) {
+            DebugLog.i("Alert", "start() requested instance=${instance != null}")
             val intent = Intent(context, AlertForegroundService::class.java).setAction(ACTION_START)
             androidx.core.content.ContextCompat.startForegroundService(context, intent)
         }
 
         fun stop(context: android.content.Context) {
+            DebugLog.i("Alert", "stop() requested instance=${instance != null}")
             val intent = Intent(context, AlertForegroundService::class.java).setAction(ACTION_STOP)
             instance?.confirmAndStopMonitoring() ?: run {
                 try {
                     context.startService(intent)
-                } catch (_: Exception) {
+                } catch (error: Exception) {
+                    DebugLog.e("Alert", "stop() startService failed", error)
                     context.stopService(Intent(context, AlertForegroundService::class.java))
                 }
             }
         }
 
         fun confirm(context: android.content.Context) {
+            DebugLog.i("Alert", "confirm() requested instance=${instance != null}")
             instance?.confirmAlert() ?: run {
                 context.startService(
                     Intent(context, AlertForegroundService::class.java).setAction(ACTION_CONFIRM),
@@ -327,6 +350,7 @@ class AlertForegroundService : Service() {
         }
 
         fun test(context: android.content.Context) {
+            DebugLog.i("Alert", "test() requested instance=${instance != null}")
             val intent = Intent(context, AlertForegroundService::class.java).setAction(ACTION_TEST)
             if (instance != null) {
                 instance?.onStartCommand(intent, 0, 0)
@@ -347,7 +371,7 @@ class AlertForegroundService : Service() {
                 try {
                     androidx.core.content.ContextCompat.startForegroundService(context, intent)
                 } catch (e: Exception) {
-                    Log.e(TAG, "Cannot start alert service from background", e)
+                    DebugLog.e("Alert", "Cannot start alert service from background", e)
                 }
             }
         }
