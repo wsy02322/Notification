@@ -4,7 +4,10 @@ import android.app.ActivityOptions
 import android.app.Notification
 import android.app.PendingIntent
 import android.app.Service
+import android.content.BroadcastReceiver
+import android.content.Context
 import android.content.Intent
+import android.content.IntentFilter
 import android.content.pm.ServiceInfo
 import android.media.AudioAttributes
 import android.media.MediaPlayer
@@ -18,21 +21,58 @@ import android.os.Vibrator
 import android.os.VibratorManager
 import androidx.core.app.NotificationCompat
 import androidx.core.app.ServiceCompat
+import androidx.core.content.ContextCompat
 import androidx.lifecycle.ProcessLifecycleOwner
 import androidx.lifecycle.Lifecycle
 import com.wsy.notification.MainActivity
 import com.wsy.notification.NotificationApp
 import com.wsy.notification.R
 import com.wsy.notification.debug.DebugLog
+import com.wsy.notification.keepalive.KeepAliveScheduler
+import android.service.notification.NotificationListenerService
+import com.wsy.notification.listener.NotificationMonitorService
 import com.wsy.notification.oem.PermissionChecker
 
 class AlertForegroundService : Service() {
 
     private var mediaPlayer: MediaPlayer? = null
+    private var keepAlivePlayer: MediaPlayer? = null
     private var wakeLock: PowerManager.WakeLock? = null
     private var screenWakeLock: PowerManager.WakeLock? = null
     private var alerting = false
+    private var screenReceiverRegistered = false
     private val mainHandler = Handler(Looper.getMainLooper())
+    private val retry400 = Runnable { launchAlertActivity("retry-400") }
+    private val retry1200 = Runnable { launchAlertActivity("retry-1200") }
+    private val heartbeatRunnable = object : Runnable {
+        override fun run() {
+            val pm = getSystemService(POWER_SERVICE) as PowerManager
+            DebugLog.i(
+                "KeepAlive",
+                "tick interactive=${pm.isInteractive} alerting=$alerting " +
+                    "keepAlive=${keepAlivePlayer?.isPlaying == true} wake=${wakeLock?.isHeld == true}",
+            )
+            acquireMonitorWakeLock()
+            if (!alerting) startKeepAliveAudio()
+            KeepAliveScheduler.schedule(this@AlertForegroundService)
+            mainHandler.postDelayed(this, 20_000)
+        }
+    }
+    private val screenReceiver = object : BroadcastReceiver() {
+        override fun onReceive(context: Context?, intent: Intent?) {
+            val action = intent?.action ?: return
+            val pm = getSystemService(POWER_SERVICE) as PowerManager
+            DebugLog.i("KeepAlive", "screen $action interactive=${pm.isInteractive}")
+            if (action == Intent.ACTION_SCREEN_OFF) {
+                acquireMonitorWakeLock()
+                startAsForeground(if (alerting) alertNotification() else idleNotification())
+                if (!alerting) startKeepAliveAudio()
+                NotificationListenerService.requestRebind(
+                    android.content.ComponentName(this@AlertForegroundService, NotificationMonitorService::class.java),
+                )
+            }
+        }
+    }
 
     private val vibrator: Vibrator by lazy {
         if (Build.VERSION.SDK_INT >= 31) {
@@ -62,6 +102,7 @@ class AlertForegroundService : Service() {
             ACTION_CONFIRM -> confirmAlert()
             ACTION_MATCH -> onMatch(itemFromIntent(intent))
             ACTION_TEST -> onMatch(testItem())
+            ACTION_HEARTBEAT -> startIdleForeground()
             else -> startIdleForeground()
         }
         return START_STICKY
@@ -77,16 +118,25 @@ class AlertForegroundService : Service() {
     }
 
     private fun startIdleForeground() {
-        if (!alerting) {
-            DebugLog.i("Alert", "idle foreground notification")
-            startAsForeground(idleNotification())
+        acquireMonitorWakeLock()
+        registerScreenReceiver()
+        startHeartbeat()
+        KeepAliveScheduler.schedule(this)
+        if (alerting) {
+            DebugLog.i("Alert", "keepalive while still alerting")
+            startAsForeground(alertNotification())
+            return
         }
+        startKeepAliveAudio()
+        DebugLog.i("Alert", "idle foreground notification")
+        startAsForeground(idleNotification())
     }
 
     private fun startAlerting() {
         if (!alerting) {
             alerting = true
-            acquireWakeLock()
+            stopKeepAliveAudio()
+            acquireMonitorWakeLock()
             startSound()
             startVibration()
             DebugLog.i("Alert", "start looping sound+vibrate")
@@ -97,7 +147,8 @@ class AlertForegroundService : Service() {
 
     private fun confirmAlert() {
         DebugLog.i("Alert", "confirm alerting=$alerting queued=${AlertState.snapshot().size}")
-        mainHandler.removeCallbacksAndMessages(null)
+        mainHandler.removeCallbacks(retry400)
+        mainHandler.removeCallbacks(retry1200)
         if (!alerting && AlertState.snapshot().isEmpty()) {
             startAsForeground(idleNotification())
             return
@@ -105,13 +156,20 @@ class AlertForegroundService : Service() {
         stopSoundAndVibration()
         alerting = false
         AlertState.clear()
+        startKeepAliveAudio()
         startAsForeground(idleNotification())
     }
 
     private fun confirmAndStopMonitoring() {
         DebugLog.i("Alert", "stop monitoring service")
-        mainHandler.removeCallbacksAndMessages(null)
+        mainHandler.removeCallbacks(retry400)
+        mainHandler.removeCallbacks(retry1200)
+        mainHandler.removeCallbacks(heartbeatRunnable)
+        KeepAliveScheduler.cancel(this)
+        unregisterScreenReceiver()
         stopSoundAndVibration()
+        stopKeepAliveAudio()
+        releaseMonitorWakeLock()
         alerting = false
         AlertState.clear()
         instance = null
@@ -121,7 +179,8 @@ class AlertForegroundService : Service() {
 
     private fun startAsForeground(notification: Notification) {
         val type = if (Build.VERSION.SDK_INT >= 34) {
-            ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE
+            ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE or
+                ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PLAYBACK
         } else {
             0
         }
@@ -139,7 +198,8 @@ class AlertForegroundService : Service() {
             .setOnlyAlertOnce(true)
             .setSilent(true)
             .setForegroundServiceBehavior(NotificationCompat.FOREGROUND_SERVICE_IMMEDIATE)
-            .setPriority(NotificationCompat.PRIORITY_LOW)
+            .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
+            .setPriority(NotificationCompat.PRIORITY_DEFAULT)
             .build()
     }
 
@@ -199,8 +259,10 @@ class AlertForegroundService : Service() {
         DebugLog.i("Alert", "launch AlertActivity inForeground=$inForeground canFsi=$canFsi")
         wakeScreen()
         launchAlertActivity("immediate")
-        mainHandler.postDelayed({ launchAlertActivity("retry-400") }, 400)
-        mainHandler.postDelayed({ launchAlertActivity("retry-1200") }, 1200)
+        mainHandler.removeCallbacks(retry400)
+        mainHandler.removeCallbacks(retry1200)
+        mainHandler.postDelayed(retry400, 400)
+        mainHandler.postDelayed(retry1200, 1200)
     }
 
     private fun launchAlertActivity(reason: String) {
@@ -299,20 +361,81 @@ class AlertForegroundService : Service() {
             vibrator.cancel()
         } catch (_: Exception) {
         }
-        releaseWakeLock()
         releaseScreenWakeLock()
     }
 
-    private fun acquireWakeLock() {
-        if (wakeLock?.isHeld == true) return
-        val pm = getSystemService(POWER_SERVICE) as PowerManager
-        wakeLock = pm.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "notifywatch:alert").apply {
-            setReferenceCounted(false)
-            acquire(10 * 60 * 1000L)
+    private fun startKeepAliveAudio() {
+        if (alerting) return
+        if (keepAlivePlayer?.isPlaying == true) return
+        try {
+            keepAlivePlayer?.release()
+            val player = MediaPlayer.create(this, R.raw.silence) ?: run {
+                DebugLog.e("KeepAlive", "silence MediaPlayer.create returned null")
+                return
+            }
+            player.isLooping = true
+            player.setVolume(0f, 0f)
+            player.setAudioAttributes(
+                AudioAttributes.Builder()
+                    .setUsage(AudioAttributes.USAGE_MEDIA)
+                    .setContentType(AudioAttributes.CONTENT_TYPE_MUSIC)
+                    .build(),
+            )
+            player.setWakeMode(this, PowerManager.PARTIAL_WAKE_LOCK)
+            player.start()
+            keepAlivePlayer = player
+            DebugLog.i("KeepAlive", "silent media started")
+        } catch (e: Exception) {
+            DebugLog.e("KeepAlive", "silent media failed", e)
         }
     }
 
-    private fun releaseWakeLock() {
+    private fun stopKeepAliveAudio() {
+        try {
+            keepAlivePlayer?.run {
+                if (isPlaying) stop()
+                release()
+            }
+        } catch (_: Exception) {
+        }
+        keepAlivePlayer = null
+    }
+
+    private fun startHeartbeat() {
+        mainHandler.removeCallbacks(heartbeatRunnable)
+        mainHandler.post(heartbeatRunnable)
+    }
+
+    private fun registerScreenReceiver() {
+        if (screenReceiverRegistered) return
+        val filter = IntentFilter().apply {
+            addAction(Intent.ACTION_SCREEN_OFF)
+            addAction(Intent.ACTION_SCREEN_ON)
+        }
+        ContextCompat.registerReceiver(this, screenReceiver, filter, ContextCompat.RECEIVER_EXPORTED)
+        screenReceiverRegistered = true
+    }
+
+    private fun unregisterScreenReceiver() {
+        if (!screenReceiverRegistered) return
+        try {
+            unregisterReceiver(screenReceiver)
+        } catch (_: Exception) {
+        }
+        screenReceiverRegistered = false
+    }
+
+    private fun acquireMonitorWakeLock() {
+        val pm = getSystemService(POWER_SERVICE) as PowerManager
+        if (wakeLock?.isHeld == true) return
+        wakeLock = pm.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "notifywatch:monitor").apply {
+            setReferenceCounted(false)
+            acquire(6 * 60 * 60 * 1000L)
+        }
+        DebugLog.i("KeepAlive", "monitor wakeLock acquired interactive=${pm.isInteractive}")
+    }
+
+    private fun releaseMonitorWakeLock() {
         try {
             if (wakeLock?.isHeld == true) wakeLock?.release()
         } catch (_: Exception) {
@@ -358,7 +481,14 @@ class AlertForegroundService : Service() {
 
     override fun onDestroy() {
         DebugLog.w("Alert", "service onDestroy")
+        mainHandler.removeCallbacks(heartbeatRunnable)
+        mainHandler.removeCallbacks(retry400)
+        mainHandler.removeCallbacks(retry1200)
+        KeepAliveScheduler.cancel(this)
+        unregisterScreenReceiver()
         stopSoundAndVibration()
+        stopKeepAliveAudio()
+        releaseMonitorWakeLock()
         AlertState.clear()
         instance = null
         super.onDestroy()
@@ -370,6 +500,7 @@ class AlertForegroundService : Service() {
         const val ACTION_MATCH = "com.wsy.notification.action.MATCH"
         const val ACTION_CONFIRM = "com.wsy.notification.action.CONFIRM"
         const val ACTION_TEST = "com.wsy.notification.action.TEST"
+        const val ACTION_HEARTBEAT = "com.wsy.notification.action.HEARTBEAT_SERVICE"
 
         const val EXTRA_PACKAGE = "extra_package"
         const val EXTRA_LABEL = "extra_label"

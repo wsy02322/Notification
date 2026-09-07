@@ -32,10 +32,25 @@ object PermissionChecker {
         return pm.isIgnoringBatteryOptimizations(context.packageName)
     }
 
+    fun canScheduleExactAlarms(context: Context): Boolean {
+        if (Build.VERSION.SDK_INT < 31) return true
+        val am = context.getSystemService(android.app.AlarmManager::class.java)
+        return am.canScheduleExactAlarms()
+    }
+
     fun canUseFullScreenIntent(context: Context): Boolean {
         if (Build.VERSION.SDK_INT < 34) return true
         val nm = context.getSystemService(NotificationManager::class.java)
         return nm.canUseFullScreenIntent()
+    }
+
+    fun openExactAlarmSettings(context: Context) {
+        if (Build.VERSION.SDK_INT < 31) return
+        context.startActivity(
+            Intent(Settings.ACTION_REQUEST_SCHEDULE_EXACT_ALARM)
+                .setData(Uri.parse("package:${context.packageName}"))
+                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
+        )
     }
 
     fun openNotificationListenerSettings(context: Context) {

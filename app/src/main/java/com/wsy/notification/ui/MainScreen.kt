@@ -61,12 +61,14 @@ fun MainRoute() {
     var canNotify by remember { mutableStateOf(true) }
     var batteryOk by remember { mutableStateOf(false) }
     var fsiOk by remember { mutableStateOf(true) }
+    var exactAlarmOk by remember { mutableStateOf(true) }
 
     fun refreshPermissions() {
         listenerOn = PermissionChecker.isNotificationListenerEnabled(context)
         canNotify = PermissionChecker.canPostNotifications(context)
         batteryOk = PermissionChecker.isIgnoringBatteryOptimizations(context)
         fsiOk = PermissionChecker.canUseFullScreenIntent(context)
+        exactAlarmOk = PermissionChecker.canScheduleExactAlarms(context)
         monitoring = prefs.monitoringEnabled
     }
 
@@ -115,9 +117,12 @@ fun MainRoute() {
             ChecklistRow("全屏提醒（熄屏弹出确认页）", fsiOk) {
                 PermissionChecker.openFullScreenIntentSettings(context)
             }
+            ChecklistRow("精确闹钟（熄屏保活）", exactAlarmOk) {
+                PermissionChecker.openExactAlarmSettings(context)
+            }
 
             Text(
-                "当前机型：${OemSettings.brandLabel()}。再打开厂商后台设置，并在最近任务里锁定本应用。荣耀必须打开「后台弹出界面」，否则后台只有声音没有确认页。",
+                "当前机型：${OemSettings.brandLabel()}。再打开厂商后台设置，并在最近任务里锁定本应用。荣耀必须打开「后台弹出界面」。熄屏测试时通知栏要一直显示「正在监听」。",
                 style = MaterialTheme.typography.bodySmall,
             )
             OemSettings.guidanceLines().forEach { line ->
@@ -183,6 +188,9 @@ fun MainRoute() {
                     }
                     if (!batteryOk) {
                         PermissionChecker.requestIgnoreBatteryOptimizations(context)
+                    }
+                    if (Build.VERSION.SDK_INT >= 31 && !exactAlarmOk) {
+                        PermissionChecker.openExactAlarmSettings(context)
                     }
                     prefs.monitoringEnabled = true
                     monitoring = true

@@ -22,12 +22,13 @@ class NotificationApp : Application() {
         val monitor = NotificationChannel(
             CHANNEL_MONITOR,
             getString(R.string.channel_monitor_name),
-            NotificationManager.IMPORTANCE_LOW,
+            NotificationManager.IMPORTANCE_DEFAULT,
         ).apply {
             description = getString(R.string.channel_monitor_desc)
             setShowBadge(false)
             setSound(null, null)
             enableVibration(false)
+            lockscreenVisibility = android.app.Notification.VISIBILITY_PUBLIC
         }
 
         val alert = NotificationChannel(
@@ -50,7 +51,7 @@ class NotificationApp : Application() {
     }
 
     companion object {
-        const val CHANNEL_MONITOR = "monitor_idle"
+        const val CHANNEL_MONITOR = "monitor_idle_v2"
         const val CHANNEL_ALERT = "monitor_alert"
         const val NOTIFICATION_ID = 1001
     }

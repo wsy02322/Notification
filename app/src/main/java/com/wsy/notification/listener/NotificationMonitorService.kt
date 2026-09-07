@@ -21,7 +21,11 @@ class NotificationMonitorService : NotificationListenerService() {
 
     override fun onListenerConnected() {
         super.onListenerConnected()
-        DebugLog.i("Listener", "connected")
+        val pm = getSystemService(POWER_SERVICE) as android.os.PowerManager
+        DebugLog.i("Listener", "connected interactive=${pm.isInteractive} monitoring=${prefs.monitoringEnabled}")
+        if (prefs.monitoringEnabled) {
+            AlertForegroundService.start(this)
+        }
     }
 
     override fun onListenerDisconnected() {
@@ -71,7 +75,9 @@ class NotificationMonitorService : NotificationListenerService() {
             DebugLog.i(
                 "Listener",
                 "$reason pkg=${content.packageName} label='${content.appLabel}' " +
-                    "title='${content.title}' text='${content.text}' extras=${extrasDump(notification.notification.extras)}",
+                    "title='${content.title}' text='${content.text}' " +
+                    "screenOn=${(getSystemService(POWER_SERVICE) as android.os.PowerManager).isInteractive} " +
+                    "extras=${extrasDump(notification.notification.extras)}",
             )
         }
         if (!reason.startsWith("HIT")) return
