@@ -1,0 +1,161 @@
+package com.wsy.notification.listener
+
+import android.app.Notification
+import android.content.ComponentName
+import android.os.Bundle
+import android.service.notification.NotificationListenerService
+import android.service.notification.StatusBarNotification
+import com.wsy.notification.alert.AlertForegroundService
+import com.wsy.notification.alert.AlertItem
+import com.wsy.notification.debug.DebugLog
+import com.wsy.notification.match.DedupTracker
+import com.wsy.notification.match.KeywordMatcher
+import com.wsy.notification.match.NotificationContent
+import com.wsy.notification.match.NotificationTextExtractor
+import com.wsy.notification.prefs.MonitorPrefs
+
+class NotificationMonitorService : NotificationListenerService() {
+
+    private val dedup = DedupTracker()
+    private val prefs by lazy { MonitorPrefs(this) }
+
+    override fun onListenerConnected() {
+        super.onListenerConnected()
+        val pm = getSystemService(POWER_SERVICE) as android.os.PowerManager
+        DebugLog.i("Listener", "connected interactive=${pm.isInteractive} monitoring=${prefs.monitoringEnabled}")
+        if (prefs.monitoringEnabled) {
+            AlertForegroundService.start(this)
+        }
+    }
+
+    override fun onListenerDisconnected() {
+        super.onListenerDisconnected()
+        DebugLog.w("Listener", "disconnected, requestRebind")
+        requestRebind(ComponentName(this, NotificationMonitorService::class.java))
+    }
+
+    override fun onNotificationPosted(sbn: StatusBarNotification?) {
+        val notification = sbn ?: return
+        if (notification.packageName == packageName) return
+        val selected = prefs.selectedPackages
+        val interesting = notification.packageName in selected
+        if (!prefs.monitoringEnabled) {
+            if (interesting) DebugLog.i("Listener", "skip ${notification.packageName} monitoring=off")
+            return
+        }
+        if (notification.isOngoing) {
+            if (interesting) DebugLog.i("Listener", "skip ${notification.packageName} ongoing")
+            return
+        }
+        val flags = notification.notification.flags
+        if (flags and Notification.FLAG_GROUP_SUMMARY != 0) {
+            if (interesting) DebugLog.i("Listener", "skip ${notification.packageName} group-summary")
+            return
+        }
+
+        val content = extract(notification)
+        if (content == null) {
+            DebugLog.w("Listener", "skip ${notification.packageName} extract=null")
+            return
+        }
+        if (!dedup.isNew(notification.key, content.fingerprint())) {
+            if (interesting) DebugLog.i("Listener", "skip ${content.packageName} dedup key=${notification.key}")
+            return
+        }
+
+        val keywords = KeywordMatcher.parseKeywords(prefs.keywordsRaw)
+        var reason = KeywordMatcher.diagnose(content, selected, keywords)
+        if (reason.startsWith("SKIP") && KeywordMatcher.isGenericUnreadSummary(content)) {
+            val previous = prefs.recentHitKeyword(content.packageName)
+            if (previous != null) {
+                reason = "HIT follow-up-summary after keyword='$previous'"
+            }
+        }
+        if (interesting || reason.startsWith("HIT")) {
+            DebugLog.i(
+                "Listener",
+                "$reason pkg=${content.packageName} label='${content.appLabel}' " +
+                    "title='${content.title}' text='${content.text}' " +
+                    "screenOn=${(getSystemService(POWER_SERVICE) as android.os.PowerManager).isInteractive} " +
+                    "extras=${extrasDump(notification.notification.extras)}",
+            )
+        }
+        if (!reason.startsWith("HIT")) return
+        val hitKeyword = Regex("keyword='([^']*)'").find(reason)?.groupValues?.get(1)
+            ?: keywords.firstOrNull().orEmpty()
+        prefs.recordHit(content.packageName, hitKeyword)
+
+        AlertForegroundService.postMatch(
+            this,
+            AlertItem(
+                packageName = content.packageName,
+                appLabel = content.appLabel,
+                title = content.title,
+                text = content.text,
+            ),
+        )
+    }
+
+    private fun extract(sbn: StatusBarNotification): NotificationContent? {
+        val n = sbn.notification ?: return null
+        val extras = n.extras
+        val title = NotificationTextExtractor.combineTitle(
+            extras.charSeq(Notification.EXTRA_TITLE),
+            extras.charSeq(Notification.EXTRA_CONVERSATION_TITLE),
+            n.tickerText?.toString(),
+        )
+        val body = NotificationTextExtractor.combineBody(
+            text = extras.charSeq(Notification.EXTRA_TEXT),
+            bigText = extras.charSeq(Notification.EXTRA_BIG_TEXT),
+            subText = extras.charSeq(Notification.EXTRA_SUB_TEXT),
+            infoText = extras.charSeq(Notification.EXTRA_INFO_TEXT),
+            summaryText = extras.charSeq(Notification.EXTRA_SUMMARY_TEXT),
+            textLines = extras.charSeqArray(Notification.EXTRA_TEXT_LINES),
+            messages = extras.messagingTexts(),
+            ticker = n.tickerText?.toString(),
+        )
+        val appLabel = appLabelOf(sbn.packageName)
+        return NotificationContent(
+            packageName = sbn.packageName,
+            appLabel = appLabel,
+            title = title,
+            text = body,
+        )
+    }
+
+    private fun appLabelOf(packageName: String): String {
+        return try {
+            val info = packageManager.getApplicationInfo(packageName, 0)
+            packageManager.getApplicationLabel(info).toString()
+        } catch (_: Exception) {
+            packageName
+        }
+    }
+
+    private fun Bundle.charSeq(key: String): String? =
+        getCharSequence(key)?.toString()
+
+    private fun Bundle.charSeqArray(key: String): List<String> =
+        getCharSequenceArray(key)?.map { it.toString() }.orEmpty()
+
+    private fun Bundle.messagingTexts(): List<String> {
+        val array = getParcelableArray(Notification.EXTRA_MESSAGES) ?: return emptyList()
+        val out = mutableListOf<String>()
+        for (item in array) {
+            val bundle = item as? Bundle ?: continue
+            val sender = bundle.getCharSequence("sender")?.toString().orEmpty()
+            val text = bundle.getCharSequence("text")?.toString().orEmpty()
+            val line = listOf(sender, text).filter { it.isNotBlank() }.joinToString(": ")
+            if (line.isNotBlank()) out += line
+        }
+        return out
+    }
+
+    private fun extrasDump(extras: Bundle?): String {
+        if (extras == null) return "{}"
+        return extras.keySet().sorted().joinToString(prefix = "{", postfix = "}") { key ->
+            val value = extras.get(key)?.toString()?.replace("\n", " ")?.take(60).orEmpty()
+            "$key=$value"
+        }
+    }
+}
